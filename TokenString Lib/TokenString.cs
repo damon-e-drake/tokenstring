@@ -20,7 +20,28 @@ namespace VeriSubtle.Utilities {
     private static char[] Numbers = "0123456789".ToCharArray();
     private static RNGCryptoServiceProvider rng = new RNGCryptoServiceProvider();
 
-    public static string NewToken(string TokenMask) {
+    public string Value { get; private set; }
+    public string Mask { get; private set; }
+    public bool IsValid {
+      get {
+        return GetIsValid(this.Value, this.Mask);
+      }
+    }
+    public override bool Equals(object o) {
+      if (o is TokenString) {
+        var x = (TokenString)o;
+        return (this.Value == x.Value && this.Mask == x.Mask);
+      }
+
+      return false;
+    }
+    public override int GetHashCode() {
+      return this.Value.GetHashCode();
+    }
+    public override string ToString() {
+      return this.Value;
+    }
+    public static TokenString NewTokenString(string TokenMask) {
       char r = ' ';
       var sb = new char[TokenMask.Length];
       var mb = new byte[TokenMask.Length];
@@ -54,18 +75,18 @@ namespace VeriSubtle.Utilities {
         }
       });
 
-      return new string(sb);
+      return new TokenString { Value = new string(sb), Mask = TokenMask };
     }
-    public static List<string> NewTokens(string TokenMask, int Capacity, int MaxCycles = 5) {
-      var list = new BlockingCollection<string>();
+    public static List<TokenString> NewTokenStrings(string TokenMask, int Capacity, int MaxCycles = 5) {
+      var list = new BlockingCollection<TokenString>();
       var cycles = 0;
 
       while (cycles < MaxCycles && list.Count < Capacity) {
         Parallel.For(1, Capacity + 1, (i, state) => {
           if (cycles >= MaxCycles || list.Count == Capacity) { state.Stop(); }
 
-          var f = NewToken(TokenMask);
-          if (!list.Contains(f)) { list.Add(f); }
+          var f = NewTokenString(TokenMask);
+          if (list.Count(x => x.Value == f.Value) == 0) { list.Add(f); }
         });
 
         cycles++;
@@ -74,7 +95,7 @@ namespace VeriSubtle.Utilities {
       Console.WriteLine(cycles);
       return list.Take(Capacity).ToList();
     }
-    public static bool IsValid(string TokenString, string TokenMask) {
+    public static bool GetIsValid(string TokenString, string TokenMask) {
       var vals = new BlockingCollection<bool>();
       if (TokenString.Length != TokenMask.Length) { return false; }
 
@@ -115,6 +136,16 @@ namespace VeriSubtle.Utilities {
       });
 
       return vals.Contains(false) ? false : true;
+    }
+
+    public static bool operator ==(TokenString x, TokenString y) {
+      return x.Equals(y);
+    }
+    public static bool operator !=(TokenString x, TokenString y) {
+      return !x.Equals(y);
+    }
+    public static implicit operator string(TokenString ts) {
+      return ts.Value;
     }
   }
 }

@@ -9,7 +9,7 @@ namespace TokenStringConsole {
     public static void Main(string[] args) {
       Stopwatch sw = new Stopwatch();
       sw.Start();
-      var items = TokenString.NewTokens("#~###-#####-~####", 10000);
+      var items = TokenString.NewTokenStrings("#####-#####-~####", 100);
       sw.Stop();
 
       Console.WriteLine("{0} items", items.Count());
@@ -18,7 +18,7 @@ namespace TokenStringConsole {
       sw.Reset();
       sw.Start();
       Parallel.For(0, items.Count, i => {
-        if (!TokenString.IsValid(items[i], "#~###-#####-~####")) {
+        if (!TokenString.GetIsValid(items[i], "#~###-#####-~####")) {
           Console.WriteLine("Failed Validation.");
         }
       });
