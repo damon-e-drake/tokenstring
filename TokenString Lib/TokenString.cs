@@ -3,36 +3,45 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Security.Cryptography;
+using System.Text;
 using System.Threading.Tasks;
 
 namespace VeriSubtle.Utilities {
   public struct TokenString {
-    // # = AlphaNumeric (any case)
-    // _ = AlphaNumeric (lowercase)
-    // + = AlphaNumeric (uppercase)
-    // @ = AlphaOnly (any case)
-    // * = Number
-    // ~ = Repeater
-    private static char[] AlphaNumericAny = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPARSTUVWXYZ0123456789".ToCharArray();
-    private static char[] AlphaOnly = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPARSTUVWXYZ".ToCharArray();
-    private static char[] AlphaNumericLower = "abcdefghjkmnpqrstuvwxyz0123456789".ToCharArray();
-    private static char[] AlphaNumericUpper = "ABCDEFGHJKMNPARSTUVWXYZ0123456789".ToCharArray();
+    private static char[] AlphaLower = "abcdefghjkmnpqrstuvwxyz".ToCharArray();
+    private static char[] AlphaUpper = "ABCDEFGHJKMNPARSTUVWXYZ".ToCharArray();
     private static char[] Numbers = "0123456789".ToCharArray();
     private static RNGCryptoServiceProvider rng = new RNGCryptoServiceProvider();
 
+    private static readonly Dictionary<char, char[]> Masking = new Dictionary<char, char[]> {
+      { '#', AlphaLower.Concat(AlphaUpper).Concat(Numbers).ToArray() },
+      { '@', AlphaLower.Concat(AlphaUpper).ToArray() },
+      { '*', Numbers}
+    };
+
+    public static Dictionary<int, string> AvailableMasks = new Dictionary<int, string> {
+      { 121, "@@~#~#@@*~##~#" },
+      { 113, "####~#####~######~#" }
+    };
+
     public string Value { get; private set; }
-    public string Mask { get; private set; }
+    public string HexValue {
+      get {
+        return BitConverter.ToString(Encoding.UTF8.GetBytes(Value)).Replace("-", "");
+      }
+    }
+    public string Base64 {
+      get {
+        return Convert.ToBase64String(Encoding.UTF8.GetBytes(Value));
+      }
+    }
     public bool IsValid {
       get {
-        return GetIsValid(this.Value, this.Mask);
+        return GetIsValid(this.Value);
       }
     }
     public override bool Equals(object o) {
-      if (o is TokenString) {
-        var x = (TokenString)o;
-        return (this.Value == x.Value && this.Mask == x.Mask);
-      }
-
+      if (o is TokenString) { return (this.Value == ((TokenString)o).Value); }
       return false;
     }
     public override int GetHashCode() {
@@ -41,96 +50,68 @@ namespace VeriSubtle.Utilities {
     public override string ToString() {
       return this.Value;
     }
-    public static TokenString NewTokenString(string TokenMask) {
-      char r = ' ';
-      var sb = new char[TokenMask.Length];
-      var mb = new byte[TokenMask.Length];
+    public static TokenString NewTokenString(int MaskID) {
+      var mask = AvailableMasks[MaskID];
+      byte r = 0;
+      var sb = new byte[mask.Length + 1];
+      var mk = ASCIIEncoding.ASCII.GetBytes(mask);
+      var mb = new byte[mask.Length];
       rng.GetBytes(mb);
 
-      Parallel.For(0, TokenMask.Length, i => {
-        var c = TokenMask[i];
-        switch (c) {
-          case '#':
-            sb[i] = AlphaNumericAny[(int)mb[i] % AlphaNumericAny.Length];
-            break;
-          case '_':
-            sb[i] = AlphaNumericLower[(int)mb[i] % AlphaNumericLower.Length];
-            break;
-          case '+':
-            sb[i] = AlphaNumericUpper[(int)mb[i] % AlphaNumericUpper.Length];
-            break;
-          case '*':
-            sb[i] = Numbers[(int)mb[i] % Numbers.Length];
-            break;
-          case '@':
-            sb[i] = AlphaOnly[(int)mb[i] % AlphaOnly.Length];
-            break;
-          case '~':
-            r = r == ' ' ? AlphaNumericAny[(int)mb[i] % AlphaNumericAny.Length] : r;
-            sb[i] = r;
-            break;
-          default:
-            sb[i] = c;
-            break;
+      sb[mask.Length] = (byte)((char)MaskID);
+
+      Parallel.For(0, mk.Length, i => {
+        var c = (char)mk[i];
+        char[] x = null;
+
+        if (Masking.TryGetValue(c, out x)) {
+          sb[i] = (byte)x[(int)mb[i] % x.Length];
+          return;
         }
+
+        if (c == '~') {
+          r = r == 0 ? (byte)Masking['#'][(int)mb[i] % Masking['#'].Length] : r;
+          sb[i] = r;
+          return;
+        }
+
+        sb[i] = (byte)c;
       });
 
-      return new TokenString { Value = new string(sb), Mask = TokenMask };
+      return new TokenString { Value = Encoding.UTF8.GetString(sb) };
     }
-    public static List<TokenString> NewTokenStrings(string TokenMask, int Capacity, int MaxCycles = 5) {
-      var list = new BlockingCollection<TokenString>();
-      var cycles = 0;
+    public static List<TokenString> NewTokenStrings(int tokenMask, int Capacity) {
+      var tokens = new BlockingCollection<TokenString>();
 
-      while (cycles < MaxCycles && list.Count < Capacity) {
-        Parallel.For(1, Capacity + 1, (i, state) => {
-          if (cycles >= MaxCycles || list.Count == Capacity) { state.Stop(); }
+      Parallel.For(1, (int)(Capacity * 1.08), (i, state) => { tokens.Add(NewTokenString(tokenMask)); });
 
-          var f = NewTokenString(TokenMask);
-          if (list.Count(x => x.Value == f.Value) == 0) { list.Add(f); }
-        });
-
-        cycles++;
-      }
-
-      Console.WriteLine(cycles);
-      return list.Take(Capacity).ToList();
+      return tokens.Distinct().Take(Capacity).ToList();
     }
-    public static bool GetIsValid(string TokenString, string TokenMask) {
+    public static bool GetIsValid(string TokenString) {
       var vals = new BlockingCollection<bool>();
-      if (TokenString.Length != TokenMask.Length) { return false; }
+      var c = (int)TokenString[TokenString.Length - 1];
+      string s = null;
+
+      if (!AvailableMasks.TryGetValue(c, out s)) { return false; }
+      if (TokenString.Length - 1 != s.Length) { return false; }
 
       var r = ' ';
       var f = TokenString.ToCharArray();
-      var m = TokenMask.ToCharArray();
-
-      Parallel.For(0, TokenString.Length, (i, state) => {
+      Parallel.For(0, f.Length - 1, (i, state) => {
         var isvalid = false;
 
-        var c = m[i];
-        switch (c) {
-          case '#':
-            isvalid = AlphaNumericAny.Contains(f[i]);
-            break;
-          case '_':
-            isvalid = AlphaNumericLower.Contains(f[i]);
-            break;
-          case '+':
-            isvalid = AlphaNumericUpper.Contains(f[i]);
-            break;
-          case '*':
-            isvalid = Numbers.Contains(f[i]);
-            break;
-          case '@':
-            isvalid = AlphaOnly.Contains(f[i]);
-            break;
-          case '~':
-            r = r == ' ' ? f[i] : r;
-            isvalid = (r == f[i]);
-            break;
-          default:
-            isvalid = (f[i] == m[i]);
-            break;
+        char[] x = null;
+        if (Masking.TryGetValue(s[i], out x)) {
+          isvalid = x.Contains(f[i]);
         }
+
+        if (s[i] == '~') {
+          r = r == ' ' ? f[i] : r;
+          isvalid = (r == f[i]);
+        }
+
+        isvalid = isvalid ? true : (f[i] == s[i]);
+
         vals.Add(isvalid);
         if (!isvalid) { state.Stop(); }
       });
