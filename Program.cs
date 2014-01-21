@@ -10,11 +10,12 @@ namespace TokenStringConsole {
   public class Program {
     public static void Main(string[] args) {
       double total = 0.0;
-      for (int i = 0; i <= 1; i++) {
+      for (int i = 0; i <= 2; i++) {
         Stopwatch sw = new Stopwatch();
         sw.Start();
         var items = TokenString.NewTokenString(113);
-        var b = TokenString.GetIsValid(items.Value);
+        var b = items.Value.IsValid(113);
+        Console.WriteLine(items.HexValue.TokenFormat("10-4-6-10-3-7"));
         Console.WriteLine(b);
         sw.Stop();
         //Console.WriteLine("Cycle {0} completed at {1:0.00} ms with {2} items", (i + 1), sw.Elapsed.TotalMilliseconds, items.Count);
@@ -25,7 +26,7 @@ namespace TokenStringConsole {
         //}
       }
 
-      Console.WriteLine("Total = {0:#,##0.00}", total / 5);
+      Console.WriteLine("Total = {0:#,##0.00}", total / 3);
 
 
       //foreach (var x in TokenString.AlphaNumericAny) {
